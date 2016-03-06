@@ -2,7 +2,7 @@
 // File: ctcpnetwork.h
 // Author: Bofan ZHOU
 // Create date: Feb. 29, 2016
-// Last modify date: Mar. 2, 2016
+// Last modify date: Mar. 6, 2016
 // Description:
 // ************************************* //
 
@@ -18,6 +18,7 @@
 #define SETTINGS_PATH "../lib/config/config.ini"
 #define SEND_FILE "../SendFile.HIFU"
 #define RECV_FILE "../RecvFile.HIFU"
+#define SEPARATION "*******************"
 
 class CTCPNETWORKSHARED_EXPORT CTcpNetwork : public QObject
 {
@@ -29,13 +30,13 @@ public:
 private:
     QHostAddress m_localAddress;
     QString m_localIPAddress, m_remoteIPAddress;
-    quint16 m_receivePort, m_sendPort;
+    quint64 m_receivePort, m_sendPort;
 
     QTcpServer *m_server;
     QTcpSocket *m_sendSocket, *m_receiveSocket;
 
-    qint16 m_totalBytesSend, m_bytesWritten, m_bytesToWrite, m_loadSize;
-    qint16 m_totalBytesRecv, m_bytesReceived, m_recvFileNameSize;
+    qint64 m_totalBytesSend, m_bytesWritten, m_bytesToWrite, m_loadSize;
+    qint64 m_totalBytesRecv, m_bytesReceived, m_recvFileNameSize;
     QByteArray m_baOut, m_baIn;
 
     QString m_sendFileName, m_recvFileName;

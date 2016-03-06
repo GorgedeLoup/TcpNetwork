@@ -2,7 +2,7 @@
 // File: ctcpnetwork.cpp
 // Author: Bofan ZHOU
 // Create date: Feb. 29, 2016
-// Last modify date: Mar. 2, 2016
+// Last modify date: Mar. 6, 2016
 // Description:
 // ************************************* //
 
@@ -116,7 +116,6 @@ void CTcpNetwork::listen()
 void CTcpNetwork::acceptConnection()
 {
     m_receiveSocket = m_server->nextPendingConnection();
-    qDebug() << "m_receiveSocket:" << m_receiveSocket;
     connect(m_receiveSocket, SIGNAL(readyRead()), this, SLOT(receiveFileProg()));
     connect(m_receiveSocket, SIGNAL(error(QAbstractSocket::SocketError)),
             this, SLOT(displayError(QAbstractSocket::SocketError)));
@@ -185,6 +184,7 @@ void CTcpNetwork::sendFile()
         encodeFile();
         m_bytesWritten = 0;
         connectServer();
+        connect(m_sendSocket, SIGNAL(bytesWritten(qint64)), this, SLOT(sendFileProg(qint64)));
         startSendFile(m_sendFileName);
     }
 }
@@ -193,8 +193,6 @@ void CTcpNetwork::sendFile()
 // Send the signal and start the transfer
 void CTcpNetwork::startSendFile(QString fileName)
 {
-    connect(m_sendSocket, SIGNAL(bytesWritten(qint64)), this, SLOT(sendFileProg(qint64)));
-
     m_sendTempFile = new QFile(fileName);
     if(!m_sendTempFile->open(QFile::ReadOnly))
     {
@@ -205,15 +203,16 @@ void CTcpNetwork::startSendFile(QString fileName)
 
     QDataStream outStream(&m_baOut, QIODevice::WriteOnly);
     outStream.setVersion(QDataStream::Qt_4_6);
-    // QString currentFileName = m_fileName.right(m_fileName.size() - m_fileName.lastIndexOf('/')-1);
     outStream << qint64(0) << qint64(0) << fileName;    // Write total bytes space, filename space, filename in order
     qDebug() << "File name:" << fileName;
 
     m_totalBytesSend += m_baOut.size();    // m_totalBytesSend is the bytes information of filename space and the actual bytes of the file
 
     outStream.device()->seek(0);
-    outStream << m_totalBytesSend << qint64((m_baOut.size() - sizeof(qint64)*2));     // Return the start of m_outBlock, replace two qint64 spaces by actual length information
+    outStream << m_totalBytesSend << qint64((m_baOut.size() - sizeof(qint64)*2));   // Return the start of m_outBlock,
+                                                                                    // replace two qint64 spaces by actual length information
 
+    qDebug() << "Total bytes to send:" << m_totalBytesSend;
     m_bytesToWrite = m_totalBytesSend - m_sendSocket->write(m_baOut);        // The rest data length after the head information
 
     qDebug() << "Write file head finished...";
@@ -230,7 +229,8 @@ void CTcpNetwork::sendFileProg(qint64 numBytes)
 
     if(m_bytesToWrite > 0)    // If any data has already been sent
     {
-        m_baOut = m_sendTempFile->read(qMin(m_bytesToWrite, m_loadSize));    // The data length of every send progress, here 4KB as default, if less than it, send the rest
+        m_baOut = m_sendTempFile->read(qMin(m_bytesToWrite, m_loadSize));   // The data length of every send progress, here 4KB as default,
+                                                                            // if less than it, send the rest
         m_bytesToWrite -= (int)m_sendSocket->write(m_baOut);    // Length of remaining data
 
         qDebug() << "Block wirte finished...";
@@ -248,17 +248,12 @@ void CTcpNetwork::sendFileProg(qint64 numBytes)
     {
         m_sendTempFile->close();
         m_sendSocket->close();
-        qDebug() << "All write finished.";
+        qDebug() << "Write file finished.";
+        qDebug() << SEPARATION;
         disconnect(m_sendSocket, SIGNAL(bytesWritten(qint64)), this, SLOT(sendFileProg(qint64)));
         m_bytesToWrite = 0;
         m_bytesWritten = 0;
         m_totalBytesSend = 0;
-    }
-    else
-    {
-        qDebug() << "m_bytesWritten:" << m_bytesWritten;
-        qDebug() << "m_totalBytesSend:" << m_totalBytesSend;
-        qDebug() << "Update error !";
     }
 }
 
@@ -315,9 +310,8 @@ void CTcpNetwork::receiveFileProg()
         m_receiveSocket->close();
         m_recvFileNameSize = 0;
 
-        qDebug() << "Read file finished !";
-        connect(m_receiveSocket, SIGNAL(readyRead()), this, SLOT(readHeader()));
-        disconnect(m_receiveSocket, SIGNAL(readyRead()), this, SLOT(updateFileProgress()));
+        qDebug() << "Receive file finished !";
+        qDebug() << SEPARATION;
     }
     else
         return;
