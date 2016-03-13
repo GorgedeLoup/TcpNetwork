@@ -2,7 +2,7 @@
 // File: ctcpnetwork.cpp
 // Author: Bofan ZHOU
 // Create date: Feb. 29, 2016
-// Last modify date: Mar. 6, 2016
+// Last modify date: Mar. 13, 2016
 // Description:
 // ************************************* //
 
@@ -17,7 +17,7 @@ CTcpNetwork::CTcpNetwork(QObject *parent) : QObject(parent),
 {
     m_server = new QTcpServer(this);
     m_sendSocket = new QTcpSocket(this);
-    m_receiveSocket = new QTcpSocket(this);
+    m_recvSocketTemp = new QTcpSocket(this);
 
     readSettings();
 
@@ -34,6 +34,7 @@ void CTcpNetwork::readSettings()
     m_receivePort = settings->value("Receive/Port").toString().toUShort(0,10);
     m_remoteIPAddress = settings->value("Send/IpAddress").toString();
     m_sendPort = settings->value("Send/Port").toString().toUShort(0,10);
+    m_checkPort = settings->value("Check/Port").toString().toUShort(0,10);
     delete settings;
 }
 
@@ -46,6 +47,7 @@ void CTcpNetwork::updateSettings()
     settings->setValue("Receive/Port", m_receivePort);
     settings->setValue("Send/IpAddress", m_remoteIPAddress);
     settings->setValue("Send/Port", m_sendPort);
+    settings->setValue("Check/Port", m_checkPort);
     delete settings;
 }
 
@@ -103,6 +105,7 @@ void CTcpNetwork::listen()
         if(!m_server->listen(ipAddress, m_receivePort))
         {
             //qCWarning(SERVER()) << SERVER().categoryName() << m_server->errorString();
+            qDebug() << m_server->errorString();
             m_server->close();
             return;
         }
@@ -112,23 +115,33 @@ void CTcpNetwork::listen()
 }
 
 
+// Send a signal with socket parameter
+void CTcpNetwork::sendSocketSignal(QTcpSocket *socket)
+{
+    emit readySiglSocket(socket);
+}
+
+
 // Build new socket connection
 void CTcpNetwork::acceptConnection()
 {
-    m_receiveSocket = m_server->nextPendingConnection();
-    connect(m_receiveSocket, SIGNAL(readyRead()), this, SLOT(receiveFileProg()));
-    connect(m_receiveSocket, SIGNAL(error(QAbstractSocket::SocketError)),
+    m_recvSocketTemp = m_server->nextPendingConnection();
+    connect(receiveSocket, SIGNAL(readyRead()), this, SLOT(readHeader(QTcpSocket*));
+    connect(receiveSocket, SIGNAL(error(QAbstractSocket::SocketError)),
             this, SLOT(displayError(QAbstractSocket::SocketError)));
+    m_socketList->append(m_recvSocketTemp);
 
     qDebug() << "Accept connection OK";
 }
 
 
 // Connect to the server remote host
-void CTcpNetwork::connectServer()
+void CTcpNetwork::connectServer(qint16 port)
 {
     QHostAddress ipAddress(m_remoteIPAddress);
-    m_sendSocket->connectToHost(ipAddress, m_sendPort);
+    switch (port)
+    case eQFILE: m_sendSocket->connectToHost(ipAddress, m_sendPort);
+    case eCHECK: m_checkSocket->connectToHost(ipAddress, m_checkPort);
 
 // Display the connection information
     //    qDebug() << "&&&&&&&&&&&&&&&&&&&&&&";
@@ -163,7 +176,8 @@ void CTcpNetwork::encodeFile()
     //    outData << (quint32)0xA0B0C0D0;
     //    outData << (qint32)460;
     outData.setVersion(QDataStream::Qt_4_6);
-    outData << m_sendFileName;
+    outData << qint16(eQFILE)
+            << m_sendFileName;
     qDebug() << "Encode file finished.";
 
     m_sendFile->close();
@@ -183,7 +197,7 @@ void CTcpNetwork::sendFile()
     {
         encodeFile();
         m_bytesWritten = 0;
-        connectServer();
+        connectServer(eQFILE);
         connect(m_sendSocket, SIGNAL(bytesWritten(qint64)), this, SLOT(sendFileProg(qint64)));
         startSendFile(m_sendFileName);
     }
@@ -258,25 +272,56 @@ void CTcpNetwork::sendFileProg(qint64 numBytes)
 }
 
 
-// Receive file from remote host
-void CTcpNetwork::receiveFileProg()
+// Read the header of receive pack and determine the branch
+void CTcpNetwork::readHeader()
 {
-    QDataStream inStream(m_receiveSocket);
+    QDataStream in(recvSocket);
+    in.setVersion(QDataStream::Qt_4_6);
+
+//  test the signal of readyRead
+//    qDebug() << "Ready read...";
+    qint16 header;
+    //qCDebug(CLIENT()) << CLIENT().categoryName() << "Reading header...";
+    qDebug() << "Reading header...";
+
+    in >> header;
+
+    switch (header) {
+    case eQFILE:
+        disconnect(this, SIGNAL(readySiglSocket(QTcpSocket*)), this, SLOT(readHeader(QTcpSocket*)));
+        connect(this, SIGNAL(readySiglSocket(QTcpSocket*)), this, SLOT(receiveFileProg(QTcpSocket*)));
+        qDebug() << "Receiving plan...";
+        receiveFileProg(recvSocket);
+        break;
+    case eCHECK:
+        checkConnection();
+        break;
+    default:
+        recvSocket->close();
+        break;
+    }
+}
+
+
+// Receive file from remote host
+void CTcpNetwork::receiveFileProg(QTcpSocket *recvSocket)
+{
+    QDataStream inStream(recvSocket);
     inStream.setVersion(QDataStream::Qt_4_6);
     if(m_bytesReceived <= sizeof(qint64)*2)
     {
         qDebug() << "m_bytesReceived:" << m_bytesReceived;
-        qDebug() << "bytesAvailable:" << m_receiveSocket->bytesAvailable()
+        qDebug() << "bytesAvailable:" << recvSocket->bytesAvailable()
                  << endl << "fileNameSize:" << m_recvFileNameSize;
         // If received data length is less than 16 bytes, then it has just started, save incoming head information
-        if((m_receiveSocket->bytesAvailable() >= sizeof(qint64)*2) && (m_recvFileNameSize == 0))
+        if((recvSocket->bytesAvailable() >= sizeof(qint64)*2) && (m_recvFileNameSize == 0))
         {
             // Receive the total data length and the length of filename
             inStream >> m_totalBytesRecv >> m_recvFileNameSize;
             qDebug() << "m_totalBytesRecv:" << m_totalBytesRecv << endl << "m_fileNameSize:" << m_recvFileNameSize;
             m_bytesReceived += sizeof(qint64) * 2;
         }
-        if((m_receiveSocket->bytesAvailable() >= m_recvFileNameSize) && (m_recvFileNameSize != 0))
+        if((recvSocket->bytesAvailable() >= m_recvFileNameSize) && (m_recvFileNameSize != 0))
         {
             // Receive the filename, and build the file
             inStream >> m_recvFileName;
@@ -297,8 +342,8 @@ void CTcpNetwork::receiveFileProg()
     if(m_bytesReceived < m_totalBytesRecv)
     {
         // If received data length is less than total length, then write the file
-        m_bytesReceived += m_receiveSocket->bytesAvailable();
-        m_baIn = m_receiveSocket->readAll();
+        m_bytesReceived += recvSocket->bytesAvailable();
+        m_baIn = recvSocket->readAll();
         m_receiveFile->write(m_baIn);
         m_baIn.resize(0);
     }
@@ -307,10 +352,11 @@ void CTcpNetwork::receiveFileProg()
     {
         // When receiving process is done
         m_receiveFile->close();
-        m_receiveSocket->close();
+        recvSocket->close();
         m_recvFileNameSize = 0;
 
         qDebug() << "Receive file finished !";
+        emit fileRecvDone();
         qDebug() << SEPARATION;
     }
     else
@@ -318,6 +364,92 @@ void CTcpNetwork::receiveFileProg()
     m_bytesReceived = 0;
     m_totalBytesRecv = 0;
     m_recvFileNameSize = 0;
+}
+
+
+// Read the content of a binary file, just for the TEST
+void CTcpNetwork::readFile()
+{
+    QFile readFile(m_recvFileName);
+    if (!readFile.open(QIODevice::ReadOnly))
+        qDebug() << "Open file failed !";
+
+    QDataStream baIn(&readFile);
+    QString readStr;
+    baIn >> readStr;
+    qDebug() << readStr;
+    readFile.close();
+    m_recvFileName.clear();
+}
+
+
+// Check the status of connection by sending and checking specific information
+void CTcpNetwork::checkSend()
+{
+    if (m_checkSocket->state() == m_checkSocket->ConnectingState)
+    {
+        emit socketBlockError();
+        qDebug() << "Socket block !";
+    }
+
+    else
+    {
+        connectServer(eCHECK);
+
+        QByteArray baOut;
+        QDataStream out(&baOut, QIODevice::WriteOnly);
+        out.setVersion(QDataStream::Qt_4_6);
+
+        QString receipt = genReceipt();
+
+        out << qint16(eCHECK)
+            << receipt;
+
+        m_checkSocket->write(m_baOut);
+    }
+}
+
+
+void CTcpNetwork::checkBack()
+{
+    QByteArray ba_check = m_receiveSocket->readAll();
+
+    QDataStream in(ba_check);
+    in.setVersion(QDataStream::Qt_4_6);
+
+    QString checkStr;
+    in >> checkStr;
+
+    qDebug() << checkStr;
+
+    QDataStream out(&m_baOut, QIODevice::WriteOnly);
+    out.setVersion(QDataStream::Qt_4_6);
+
+    out << checkStr;
+
+    qint64 bytesSent;
+    bytesSent = m_receiveSocket->write(m_baOut);
+
+    qDebug() << "Write finished" << bytesSent;
+    m_baOut.clear();
+    m_receiveSocket->close();
+}
+
+
+// Generate the log information of treatment plan sending
+QString CTcpNetwork::genReceipt()
+{
+    QLocale curLocale(QLocale("C"));
+    QLocale::setDefault(curLocale);
+    QDateTime dateTime = QDateTime::currentDateTime();
+    QString dateTimeString = QLocale().toString(dateTime, "ddd,d MMM yyyy, hh:mm:ss");
+
+    QString server = "ServerName";
+    QString client = "ClientName";
+    QString receipt;
+    receipt = "From: " + server + ", " + "To: " + client + ", " + "At: " + dateTimeString;
+
+    return receipt;
 }
 
 
