@@ -11,6 +11,8 @@ QT       -= gui
 TARGET = CTcpNetwork
 TEMPLATE = lib
 
+CONFIG += c++11
+
 DEFINES += CTCPNETWORK_LIBRARY
 
 SOURCES += ctcpnetwork.cpp

@@ -2,7 +2,7 @@
 // File: ctcpnetwork.cpp
 // Author: Bofan ZHOU
 // Create date: Feb. 29, 2016
-// Last modify date: Mar. 13, 2016
+// Last modify date: Mar. 15, 2016
 // Description:
 // ************************************* //
 
@@ -12,12 +12,13 @@
 
 
 CTcpNetwork::CTcpNetwork(QObject *parent) : QObject(parent),
-    m_totalBytesSend(0), m_bytesWritten(0), m_bytesToWrite(0), m_loadSize(3*1024),
+    m_totalBytesSend(0), m_bytesWritten(0), m_bytesToWrite(0), m_loadSize(2*1024),
     m_totalBytesRecv(0), m_bytesReceived(0), m_recvFileNameSize(0)
 {
     m_server = new QTcpServer(this);
     m_sendSocket = new QTcpSocket(this);
-    m_recvSocketTemp = new QTcpSocket(this);
+    m_checkSocket = new QTcpSocket(this);
+    //m_recvSocketTemp = new QTcpSocket(this);
 
     readSettings();
 
@@ -29,7 +30,7 @@ CTcpNetwork::CTcpNetwork(QObject *parent) : QObject(parent),
 // Read IP settings from config file
 void CTcpNetwork::readSettings()
 {
-    QSettings *settings = new QSettings(SETTINGS_PATH, QSettings::IniFormat);
+    QSettings * settings = new QSettings(SETTINGS_PATH, QSettings::IniFormat);
     m_localIPAddress = settings->value("Receive/IpAddress").toString();
     m_receivePort = settings->value("Receive/Port").toString().toUShort(0,10);
     m_remoteIPAddress = settings->value("Send/IpAddress").toString();
@@ -42,7 +43,7 @@ void CTcpNetwork::readSettings()
 // Write IP settings to config file
 void CTcpNetwork::updateSettings()
 {
-    QSettings *settings = new QSettings(SETTINGS_PATH, QSettings::IniFormat);
+    QSettings * settings = new QSettings(SETTINGS_PATH, QSettings::IniFormat);
     settings->setValue("Receive/IpAddress", m_localIPAddress);
     settings->setValue("Receive/Port", m_receivePort);
     settings->setValue("Send/IpAddress", m_remoteIPAddress);
@@ -115,23 +116,19 @@ void CTcpNetwork::listen()
 }
 
 
-// Send a signal with socket parameter
-void CTcpNetwork::sendSocketSignal(QTcpSocket *socket)
-{
-    emit readySiglSocket(socket);
-}
-
-
 // Build new socket connection
 void CTcpNetwork::acceptConnection()
 {
-    m_recvSocketTemp = m_server->nextPendingConnection();
-    connect(receiveSocket, SIGNAL(readyRead()), this, SLOT(readHeader(QTcpSocket*));
-    connect(receiveSocket, SIGNAL(error(QAbstractSocket::SocketError)),
-            this, SLOT(displayError(QAbstractSocket::SocketError)));
-    m_socketList->append(m_recvSocketTemp);
-
+    QTcpSocket * recvSocket;
+    recvSocket = m_server->nextPendingConnection();
     qDebug() << "Accept connection OK";
+    connect(recvSocket, SIGNAL(error(QAbstractSocket::SocketError)),
+            this, SLOT(displayError(QAbstractSocket::SocketError)));
+
+    m_socketList.append(recvSocket);
+    //std::thread threadTemp(readHeader, recvSocket);
+    std::thread threadTemp(&this->readHeader, recvSocket);
+    threadTemp.detach();
 }
 
 
@@ -139,9 +136,16 @@ void CTcpNetwork::acceptConnection()
 void CTcpNetwork::connectServer(qint16 port)
 {
     QHostAddress ipAddress(m_remoteIPAddress);
-    switch (port)
-    case eQFILE: m_sendSocket->connectToHost(ipAddress, m_sendPort);
-    case eCHECK: m_checkSocket->connectToHost(ipAddress, m_checkPort);
+    switch (port) {
+    case eQFILE:
+        m_sendSocket->connectToHost(ipAddress, m_sendPort);
+        break;
+    case eCHECK:
+        m_checkSocket->connectToHost(ipAddress, m_checkPort);
+        break;
+    default:
+        break;
+    }
 
 // Display the connection information
     //    qDebug() << "&&&&&&&&&&&&&&&&&&&&&&";
@@ -273,32 +277,37 @@ void CTcpNetwork::sendFileProg(qint64 numBytes)
 
 
 // Read the header of receive pack and determine the branch
-void CTcpNetwork::readHeader()
+void CTcpNetwork::readHeader(QTcpSocket * recvSocket)
 {
-    QDataStream in(recvSocket);
-    in.setVersion(QDataStream::Qt_4_6);
+    if(!recvSocket->waitForReadyRead(2000))
+        qDebug() << "ReadyRead signal not captured !";
+    // EMIT ERROR SIGNAL
+    else
+    {
+        QDataStream in(recvSocket);
+        in.setVersion(QDataStream::Qt_4_6);
 
-//  test the signal of readyRead
-//    qDebug() << "Ready read...";
-    qint16 header;
-    //qCDebug(CLIENT()) << CLIENT().categoryName() << "Reading header...";
-    qDebug() << "Reading header...";
+        //  test the signal of readyRead
+        //    qDebug() << "Ready read...";
+        qint16 header;
+        //qCDebug(CLIENT()) << CLIENT().categoryName() << "Reading header...";
+        qDebug() << "Reading header...";
 
-    in >> header;
+        in >> header;
 
-    switch (header) {
-    case eQFILE:
-        disconnect(this, SIGNAL(readySiglSocket(QTcpSocket*)), this, SLOT(readHeader(QTcpSocket*)));
-        connect(this, SIGNAL(readySiglSocket(QTcpSocket*)), this, SLOT(receiveFileProg(QTcpSocket*)));
-        qDebug() << "Receiving plan...";
-        receiveFileProg(recvSocket);
-        break;
-    case eCHECK:
-        checkConnection();
-        break;
-    default:
-        recvSocket->close();
-        break;
+        switch (header) {
+        case eQFILE:
+            qDebug() << "Receiving plan...";
+            receiveFileProg(recvSocket);
+            break;
+        case eCHECK:
+            qDebug() << "Receiving and send back check signal...";
+            checkBack(recvSocket);
+            break;
+        default:
+            recvSocket->close();
+            break;
+        }
     }
 }
 
@@ -353,6 +362,7 @@ void CTcpNetwork::receiveFileProg(QTcpSocket *recvSocket)
         // When receiving process is done
         m_receiveFile->close();
         recvSocket->close();
+        recvSocket->deleteLater();
         m_recvFileNameSize = 0;
 
         qDebug() << "Receive file finished !";
@@ -400,19 +410,56 @@ void CTcpNetwork::checkSend()
         QDataStream out(&baOut, QIODevice::WriteOnly);
         out.setVersion(QDataStream::Qt_4_6);
 
-        QString receipt = genReceipt();
+        m_receipt = genReceipt();
 
         out << qint16(eCHECK)
-            << receipt;
+            << m_receipt;
 
         m_checkSocket->write(m_baOut);
     }
 }
 
 
-void CTcpNetwork::checkBack()
+// Check the send-back data to confirm the validity of connection
+void CTcpNetwork::checkRecp()
 {
-    QByteArray ba_check = m_receiveSocket->readAll();
+    //  test the signal of readyRead
+    //    qDebug() << "readyRead...";
+
+    QDataStream in(m_sendSocket);
+    in.setVersion(QDataStream::Qt_4_6);
+
+    QString receipt;
+    //  test
+    //    qDebug() << "bytesAvail:" << m_sendSocket->bytesAvailable();
+    in >> receipt;
+    m_sendSocket->close();
+
+    //  test
+    //    qDebug() << "receipt:" << receipt;
+    //  Check the consistency of the send-back data
+    //  m_receivedInfo is updated outside the current thread
+    //  not thread-safe
+    if(m_receipt == receipt)
+    {
+
+        qDebug() << "Receipt checked.";
+        //        qCDebug(SERVER()) << SERVER().categoryName() << ":" << "SUCESSFULLY SEND TREATMENT PLAN.";
+        //        qDebug() << "**************************************";
+        // Clear the variables
+        m_receipt.clear();
+        m_baOut.resize(0);
+    }
+    else
+    {
+        // EMIT ERROR SIGNAL;
+    }
+}
+
+
+void CTcpNetwork::checkBack(QTcpSocket * recvSocket)
+{
+    QByteArray ba_check = recvSocket->readAll();
 
     QDataStream in(ba_check);
     in.setVersion(QDataStream::Qt_4_6);
@@ -428,11 +475,12 @@ void CTcpNetwork::checkBack()
     out << checkStr;
 
     qint64 bytesSent;
-    bytesSent = m_receiveSocket->write(m_baOut);
+    bytesSent = recvSocket->write(m_baOut);
 
     qDebug() << "Write finished" << bytesSent;
-    m_baOut.clear();
-    m_receiveSocket->close();
+    m_baOut.resize(0);
+    recvSocket->close();
+    recvSocket->deleteLater();
 }
 
 
@@ -447,6 +495,7 @@ QString CTcpNetwork::genReceipt()
     QString server = "ServerName";
     QString client = "ClientName";
     QString receipt;
+
     receipt = "From: " + server + ", " + "To: " + client + ", " + "At: " + dateTimeString;
 
     return receipt;
