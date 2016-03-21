@@ -21,6 +21,8 @@ private slots:
     void on_u_listenButton_clicked();
     void on_u_sendButton_clicked();
 
+    void on_u_checkButton_clicked();
+
 private:
     Ui::MainWindow *ui;
 

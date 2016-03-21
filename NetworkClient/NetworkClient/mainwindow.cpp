@@ -22,3 +22,8 @@ void MainWindow::on_u_sendButton_clicked()
 {
     client.sendFile();
 }
+
+void MainWindow::on_u_checkButton_clicked()
+{
+    client.checkSend();
+}

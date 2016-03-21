@@ -13,6 +13,8 @@ TEMPLATE = lib
 
 CONFIG += c++11
 
+INCLUDEPATH += ../lib
+
 DEFINES += CTCPNETWORK_LIBRARY
 
 SOURCES += ctcpnetwork.cpp

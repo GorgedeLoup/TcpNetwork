@@ -11,6 +11,8 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 TARGET = NetworkServer
 TEMPLATE = app
 
+CONFIG += c++11
+
 INCLUDEPATH += ../lib\
                ../lib/CTcpNetwork\
                ../lib/config\

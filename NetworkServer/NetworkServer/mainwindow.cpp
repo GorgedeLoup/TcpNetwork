@@ -22,3 +22,8 @@ void MainWindow::on_u_sendButton_clicked()
 {
     server.sendFile();
 }
+
+void MainWindow::on_u_checkButton_clicked()
+{
+    server.checkSend();
+}
